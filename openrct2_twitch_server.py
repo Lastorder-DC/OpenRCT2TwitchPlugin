@@ -22,8 +22,6 @@
 # Apache mod_wsgi is not supported - use proxy to proxy request to gunicorn.
 # $ gunicorn -b 0.0.0.0:8000 openrct2_twitch_server:app
 
-# TODO : add cache to all output except message, update every 30 min.
-
 from gevent.monkey import patch_all; patch_all()  # noqa
 
 import argparse
