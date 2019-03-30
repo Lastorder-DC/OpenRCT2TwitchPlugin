@@ -1,0 +1,2 @@
+# OpenRCTTwitchServer
+OpenRCT Twitch Server
