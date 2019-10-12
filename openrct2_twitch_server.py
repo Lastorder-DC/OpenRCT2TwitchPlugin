@@ -6,6 +6,8 @@
 #
 # Complies BSD license.
 #
+# Please note that this script requires Redis server to work. You may need to install redis python module with `pip install redis`.
+#
 # How to run:
 #
 # $ pip install -r requirements.txt
@@ -19,7 +21,7 @@
 # $ python openrct2_twitch_server.py -H 0.0.0.0 -p 8000
 #
 # Alternatively, you can run via standalone WSGI server such as gunicorn.(Recommended)
-# Apache mod_wsgi is not supported - use proxy to proxy request to gunicorn.
+# Apache mod_wsgi is not supported - use mod_proxy to proxy request to gunicorn.
 # $ gunicorn -b 0.0.0.0:8000 openrct2_twitch_server:app
 
 from gevent.monkey import patch_all; patch_all()  # noqa
@@ -66,7 +68,7 @@ if not REDIS_DB:
 if not REDIS_PASSWORD:
     REDIS_PASSWORD = ""
 
-
+# API Setting
 MAX_USER_COUNT = 100
 MAX_NEWS_ENTRY_COUNT = 20
 MAX_FOLLOWERS_COUNT = 1500
@@ -114,19 +116,18 @@ def extract_irc_line(raw: str) -> IrcLine:
             yield buf
     return IrcLine(ident, parts[base], [x for x in parse(parts[base+1])])
 
-
+# Normalize channel name(Append #, lowercase all alphabet)
 def normalize_channel_name(name: str) -> str:
     if name.startswith('#'):
         return name.lower()
     else:
         return f'#{name.lower()}'
 
-
+# Extract username from IRC privmsg
 def extract_username(ident: str) -> str:
     match = re.match(r':?(\w+)!\w+@[\w\.]+', ident)
     if match:
         return match.group(1)
-
 
 # A very, very stripped down IRC client.
 class IrcClient:
@@ -160,6 +161,9 @@ class IrcClient:
     def on_open(self, ws):
         self.retries = 0
         logger.info('Connection established.')
+        # This is required to get information, user list from IRC
+        # Without this, twitch will not return information about user(badge, emotes, etc)
+        # and will not return user list
         self.ws.send('CAP REQ :twitch.tv/commands twitch.tv/membership')
         self.ws.send(f'PASS oauth:{OAUTH_KEY}')
         self.ws.send(f'NICK {USER_NAME}')
@@ -197,13 +201,17 @@ class IrcClient:
 
     def join(self, channel):
         self.send(f'JOIN {normalize_channel_name(channel)}')
-
+    
+    # This is actually not used(endpoint /part is disabled due to prevent abuse)
     def part(self, channel):
         self.send(f'PART {normalize_channel_name(channel)}')
 
+    # Twitch IRC requires respond ping command with PONG.
     def pong(self, server_ident):
         self.send(f'PONG :{server_ident}')
 
+    # Sends message to channel
+    # This may not work if specific user is not VIP at channel(slow mode, same message restriction, etc...)
     def privmsg(self, channel, msg):
         self.send(f'PRIVMSG {channel} :{msg}')
 
@@ -235,11 +243,9 @@ def handle_001(client: IrcClient, ident, username, msg):
     client.username = username
     client.logger.info(f'Signed in as {username}')
 
-
 @irc.on('PING')
 def handle_ping(client: IrcClient, ident, server_ident):
     client.pong(server_ident)
-
 
 @irc.on('GLOBALUSERSTATE')
 def handle_globaluserstate(client: IrcClient, ident):
@@ -247,7 +253,6 @@ def handle_globaluserstate(client: IrcClient, ident):
     for channel in channels:
         client.join(channel)
     client.set_connected(True)
-
 
 @irc.on('JOIN')
 def handle_join(client: IrcClient, ident, channel_name):
@@ -270,7 +275,6 @@ def handle_join(client: IrcClient, ident, channel_name):
                 spawn_later(0.1, lookup_user_batch, channel, 'login')
             channel.add_join_window(username)
 
-
 @irc.on('PART')
 def handle_part(client: IrcClient, ident, channel_name):
     channel_name = normalize_channel_name(channel_name)
@@ -281,7 +285,6 @@ def handle_part(client: IrcClient, ident, channel_name):
     else:
         if channel_name in channels:
             channels[channel_name].remove_audience(username)
-
 
 @irc.on('PRIVMSG')
 def handle_privmsg(client: IrcClient, ident, channel_name, msg):
@@ -306,11 +309,9 @@ def handle_privmsg(client: IrcClient, ident, channel_name, msg):
             client.privmsg(channel_name, f'@{username} 잠시후 메세지가 게임내 표시됩니다.')
             channel_language[channel] = "kr"
 
-
 @irc.on('353')
 def handle_names(client: IrcClient, ident, username, _, channel, names):
     channels[channel].append_audiences(names.split())
-
 
 @irc.on('366')
 def handle_end_names(client: IrcClient, ident, username, channel_name, msg):
@@ -326,7 +327,6 @@ irc.connect()
 class ChannelStatus(enum.Enum):
     connecting = 'connecting'
     connected = 'connected'
-
 
 class Channel:
     def __init__(self, name: str):
@@ -373,7 +373,6 @@ class Channel:
         t = self.join_window
         self.join_window = []
         return t
-
 
 def chunks(l: typing.Sequence[str], n: int):
     for i in range(0, len(l), n):
@@ -466,7 +465,6 @@ def fetch_followers_cached(channel: Channel, user_data: dict, after: str=''):
 
 app = Flask(__name__)
 
-
 @app.route('/join/<channel>')
 @app.route('/kr/join/<channel>')
 def join_channel(channel: str):
@@ -484,6 +482,8 @@ def join_channel_en(channel: str):
 @app.route('/kr/leave/<channel>')
 @app.route('/en/leave/<channel>')
 def leave_channel(channel: str):
+    # Re-enabling below line is not recommended.
+    # OpenRCT2 does not call leave endpoint when twitch checkbox is unchecked.
     #irc.part(channel)
     return jsonify(status=500,message="This endpoint is disabled to prevent abuse.")
 
@@ -574,6 +574,7 @@ def default_page():
 def default_page_en():
     return "OpenRCT2-Twitch integration server V 1.2"
 
+# TODO : add admin notice function
 @app.route('/admin/notice')
 def form_notice():
     # TODO add form here
@@ -581,7 +582,6 @@ def form_notice():
 
 @app.route('/admin/notice/send')
 def send_notice():
-    # TODO add force message set function here
     return "OK"
 
 def main():
@@ -593,7 +593,6 @@ def main():
     args = parser.parse_args()
     app.run(debug=args.debug, host=args.host, port=args.port,
             use_reloader=args.debug)
-
 
 if __name__ == '__main__':
     main()
