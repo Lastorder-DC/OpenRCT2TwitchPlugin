@@ -2,7 +2,7 @@
 #
 # OpenRCT2 Twitch API Server
 # (c) 2018 Fun-boong-e <https://tgd.kr/funzinnu>
-# (c) 2019 Lastorder <https://lastorder.xyz>
+# (c) 2019-2020 Lastorder <https://lastorder.xyz>
 #
 # Complies BSD license.
 #
@@ -14,17 +14,7 @@
 # $ export TS_USER_NAME=xxx       -- bot id to use(case insensitive)
 # $ export TS_OAUTH_KEY=xxx       -- obtain one at https://twitchapps.com/tmi/ - heading `oauth:` not required
 # $ export TS_CLIENT_ID=xxxxx     -- make one at Twitch developer console
-# $ export REDIS_HOST=xxxxx       -- redis host (default localhost)
-# $ export REDIS_PORT=xxxxx       -- redis port (default 6379)
-# $ export REDIS_DB=xxxxx         -- redis db (default 0)
-# $ export REDIS_PASSWORD=xxxxx   -- redis password (default blank)
 # $ python openrct2_twitch_server.py -H 0.0.0.0 -p 8000
-#
-# Alternatively, you can run via standalone WSGI server such as gunicorn.(Recommended)
-# Apache mod_wsgi is not supported - use mod_proxy to proxy request to gunicorn.
-# $ gunicorn -b 0.0.0.0:8000 openrct2_twitch_server:app
-
-from gevent.monkey import patch_all; patch_all()  # noqa
 
 import argparse
 import collections
@@ -34,13 +24,16 @@ import os
 import re
 import sys
 import typing
-import redis as rediscli
 from time import time
 import json
+import redis
+from redislite.patch import patch_redis
+import socketserver as SocketServer
+import json
 
-from flask import Flask, abort, jsonify
 from gevent import sleep, spawn, spawn_later
 from requests import get
+#pip3 install websocket-client<=0.48
 from websocket import WebSocketApp
 
 # This script requires Python 3.6 or above.
@@ -49,24 +42,12 @@ assert sys.version_info >= (3, 6), "This script requires Python 3.6 or above."
 USER_NAME = os.getenv('TS_USER_NAME')
 OAUTH_KEY = os.getenv('TS_OAUTH_KEY')
 CLIENT_ID = os.getenv('TS_CLIENT_ID')
-REDIS_HOST = os.getenv('REDIS_HOST')
-REDIS_PORT = os.getenv('REDIS_PORT')
-REDIS_DB = os.getenv('REDIS_DB')
-REDIS_PASSWORD = os.getenv('REDIS_PASSWORD')
 if not USER_NAME:
     raise RuntimeError('No environment variable: USER_NAME')
 if not OAUTH_KEY:
     raise RuntimeError('No environment variable: TS_OAUTH_KEY')
 if not CLIENT_ID:
     raise RuntimeError('No environment variable: TS_CLIENT_ID')
-if not REDIS_HOST:
-    REDIS_HOST = 'localhost'
-if not REDIS_PORT:
-    REDIS_PORT = 6379
-if not REDIS_DB:
-    REDIS_DB = 0
-if not REDIS_PASSWORD:
-    REDIS_PASSWORD = ""
 
 # API Setting
 MAX_USER_COUNT = 100
@@ -228,12 +209,9 @@ class IrcClient:
             on_close=self.on_close
         )
 
-
 irc = IrcClient()
-if REDIS_PASSWORD == "":
-    redis = rediscli.StrictRedis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
-else:
-    redis = rediscli.StrictRedis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, password=REDIS_PASSWORD, decode_responses=True)
+patch_redis("./orct2.db")
+redis = redis.StrictRedis(decode_responses=True)
 
 channels = {}
 channel_language = {}
@@ -378,7 +356,6 @@ def chunks(l: typing.Sequence[str], n: int):
     for i in range(0, len(l), n):
         yield l[i:i + n]
 
-
 def lookup_user(u: list, parameter: str):
     assert len(u) <= MAX_USER_COUNT
     logger.info(f'looking up users: {u}')
@@ -392,7 +369,6 @@ def lookup_user(u: list, parameter: str):
         return None
     json = r.json()
     return json['data']
-
 
 def lookup_user_cached(u: list, parameter: str):
     if parameter not in ('login', 'id'):
@@ -427,7 +403,6 @@ def lookup_user_expired(u: list, parameter: str):
     logger.info("Getting expired user information...")
     spawn_later(0, lookup_user_cached, u, parameter)
 
-
 def fetch_followers(id: str, after: str=''):
     url = f'https://api.twitch.tv/helix/users/follows?to_id={id}' \
           f'&after={after}&first={MAX_USER_COUNT}'
@@ -439,7 +414,6 @@ def fetch_followers(id: str, after: str=''):
         return None
     json = r.json()
     return json
-
 
 def fetch_followers_cached(channel: Channel, user_data: dict, after: str=''):
     has_more = True
@@ -462,41 +436,23 @@ def fetch_followers_cached(channel: Channel, user_data: dict, after: str=''):
         elif has_more:
             sleep(0.5)
 
-
-app = Flask(__name__)
-
-@app.route('/join/<channel>')
-@app.route('/kr/join/<channel>')
 def join_channel(channel: str):
-    irc.join(channel)
-    channel_language[channel] = "kr"
-    return jsonify(status=200)
+    if channel not in channels:
+        irc.join(channel)
+        channel_language[channel] = "kr"
 
-@app.route('/en/join/<channel>')
 def join_channel_en(channel: str):
-    irc.join(channel)
-    channel_language[channel] = "en"
-    return jsonify(status=200)
-
-@app.route('/leave/<channel>')
-@app.route('/kr/leave/<channel>')
-@app.route('/en/leave/<channel>')
-def leave_channel(channel: str):
-    # Re-enabling below line is not recommended.
-    # OpenRCT2 does not call leave endpoint when twitch checkbox is unchecked.
-    #irc.part(channel)
-    return jsonify(status=500,message="This endpoint is disabled to prevent abuse.")
-
-@app.route('/channel/<channel_name>/audience')
-@app.route('/kr/channel/<channel_name>/audience')
-@app.route('/en/channel/<channel_name>/audience')
-def audiences(channel_name: str):
+    if channel not in channels:
+        irc.join(channel)
+        channel_language[channel] = "en"
+    
+def get_audiences(channel_name: str):
     channel_name = normalize_channel_name(channel_name)
     if channel_name not in channels:
         irc.join(channel_name)
         if channel_name not in channel_language:
             channel_language[channel_name] = "kr"
-        return jsonify([])
+        return json.dumps([])
     if not redis.exists(f'/channel/{channel_name}/audience/last_time') or time() - float(redis.get(f'/channel/{channel_name}/audience/last_time')) > 120: # 2 min. passed since cache
         logger.info("Cache expired, rebuilding cache...")
         channel = channels[channel_name]
@@ -544,18 +500,15 @@ def audiences(channel_name: str):
     else:
         logger.info("Cache is still vaild, reusing cache...")
         result = json.loads(redis.get(f'/channel/{channel_name}/audience/output'))
-    return jsonify(result)
+    return json.dumps(result)
 
-@app.route('/channel/<channel_name>/messages')
-@app.route('/kr/channel/<channel_name>/messages')
-@app.route('/en/channel/<channel_name>/messages')
-def messages(channel_name: str):
+def get_messages(channel_name: str):
     channel_name = normalize_channel_name(channel_name)
     if channel_name not in channels:
         irc.join(channel_name)
         if channel_name not in channel_language:
             channel_language[channel_name] = "kr"
-        return jsonify([])
+        return json.dumps([])
     channel = channels[channel_name]
     result = []
     while True:
@@ -563,26 +516,26 @@ def messages(channel_name: str):
             result.append({'message': channel.newses.pop()})
         except IndexError:
             break
-    return jsonify(result)
+    return json.dumps(result)
 
-@app.route('/')
-@app.route('/kr')
-def default_page():
-    return "오픈롤코-트위치 통합 서버 V 1.2"
-
-@app.route('/en')
-def default_page_en():
-    return "OpenRCT2-Twitch integration server V 1.2"
-
-# TODO : add admin notice function
-@app.route('/admin/notice')
-def form_notice():
-    # TODO add form here
-    return "FORMHERE"
-
-@app.route('/admin/notice/send')
-def send_notice():
-    return "OK"
+class TwitchTCPHandler(SocketServer.BaseRequestHandler):
+    def handle(self):
+        self.data = ''
+        tcp_channel_id = ''
+        while True:
+            self.data = self.request.recv(1024).strip().decode()
+            if self.data.find("CONNECT") != -1:
+                print("CONNECT")
+                tcp_channel_id = self.data.replace("CONNECT #","")
+                join_channel(tcp_channel_id)
+                self.request.sendall(("Connected to channel" + tcp_channel_id).encode())
+            if self.data.find("get_audiences") != -1:
+                print("get_audiences")
+                send_data = get_audiences(tcp_channel_id).encode()
+                print(send_data)
+                self.request.sendall(send_data)
+            if self.data.find("quit") != -1:
+                break
 
 def main():
     logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
@@ -591,8 +544,8 @@ def main():
     parser.add_argument('-p', '--port', type=int, default=8000)
     parser.add_argument('-d', '--debug', action='store_true')
     args = parser.parse_args()
-    app.run(debug=args.debug, host=args.host, port=args.port,
-            use_reloader=args.debug)
+    server = SocketServer.TCPServer((args.host, args.port), TwitchTCPHandler)
+    server.serve_forever()
 
 if __name__ == '__main__':
     main()
