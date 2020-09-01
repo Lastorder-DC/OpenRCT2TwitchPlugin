@@ -36,7 +36,7 @@
   registerPlugin({
     name: "openrct2-twitch-test",
     version: "0.0.1",
-    licence: "MIT",
+    licence: "BSD 2-Clause",
     authors: ["Lastorder-DC"],
     type: "remote",
     main: main,
