@@ -15,6 +15,7 @@
 # $ export TS_OAUTH_KEY=xxx       -- obtain one at https://twitchapps.com/tmi/ - heading `oauth:` not required
 # $ export TS_CLIENT_ID=xxxxx     -- make one at Twitch developer console
 # $ python openrct2_twitch_server.py -H 0.0.0.0 -p 8000
+from gevent.monkey import patch_all; patch_all()  # noqa
 
 import argparse
 import collections
