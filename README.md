@@ -1,7 +1,7 @@
 ### [한국어 문서](README-ko.md)
 
-# OpenRCT2 Twitch Server
-OpenRCT2 Twitch Server
+# OpenRCT2 Twitch Plugin
+OpenRCT2 Twitch Plugin Server & OpenRCT2 Twitch Plugin
 
 # Requirements
 - Python 3.6 or above
