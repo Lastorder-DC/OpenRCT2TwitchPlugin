@@ -6,7 +6,7 @@
 #
 # Complies BSD license.
 #
-# Please note that this script requires Redis server to work. You may need to install redis python module with `pip install redis`.
+# Please note that this script requires redis python module to work. Install module with `pip install redis`.
 #
 # How to run:
 #
