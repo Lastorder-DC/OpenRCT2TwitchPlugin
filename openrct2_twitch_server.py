@@ -30,7 +30,6 @@ import json
 import redis
 from redislite.patch import patch_redis
 import socketserver as SocketServer
-import json
 
 from gevent import sleep, spawn, spawn_later
 from requests import get
