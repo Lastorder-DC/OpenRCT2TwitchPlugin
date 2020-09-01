@@ -17,6 +17,3 @@ $ pip3 install -r requirements.txt
 # How to run
 ## Development server
 $ python3 openrct2_twitch_server.py -H 0.0.0.0 -p 8000
-
-## WSGI server(gunicorn) - Not tested
-$ gunicorn -b 0.0.0.0:8000 openrct2_twitch_server:app
