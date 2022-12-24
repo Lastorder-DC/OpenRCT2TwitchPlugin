@@ -1,3 +1,5 @@
+# 지원 중단. [StreamIntegrationPlugin](https://github.com/oli414/StreamIntegrationPlugin/releases)을 대신 이용하세요.
+
 # OpenRCT2 Twitch Server
 OpenRCT2 Twitch Server
 
