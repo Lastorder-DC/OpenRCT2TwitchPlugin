@@ -1,6 +1,8 @@
 ### [한국어 문서](README-ko.md)
 
-# No Longer supported. use [StreamIntegrationPlugin](https://github.com/oli414/StreamIntegrationPlugin/releases/tag/1.4) instead.
+# No Longer supported. use [StreamIntegrationPlugin](https://github.com/oli414/StreamIntegrationPlugin/releases) instead.
+
+# 지원 중단. [StreamIntegrationPlugin](https://github.com/oli414/StreamIntegrationPlugin/releases)을 대신 이용하세요.
 
 # OpenRCT2 Twitch Plugin
 OpenRCT2 Twitch Plugin Server & OpenRCT2 Twitch Plugin
